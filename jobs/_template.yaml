@@ -1,0 +1,74 @@
+schema_version: "1.0"
+job_id: "YYYY-MM-DD_podcast_episode"
+created_at: "2026-03-02T12:34:00+01:00"
+status: "queued"
+
+items:
+  - item_id: "ep1"
+    podcast: "Podcast X"
+    episode_title: "Episodio Y"
+    source:
+      type: "gdrive_public"  # gdrive_public | direct_url | ivoox_page
+      url: "https://drive.google.com/file/d/FILEID/view?usp=sharing"
+    language_hint: "auto"     # auto | es | en | mixed
+    expected_speakers: []     # optional list of aliases to help clustering
+
+options:
+  accuracy_profile: "max_precision"  # max_precision | balanced | fast
+  model_manifest_ref: "models/models.yaml"
+
+  ingest:
+    allow_ivoox: false   # IMPORTANT: iVoox ToS risk; keep false unless you accept it.
+
+  asr:
+    engine: "faster-whisper"
+    model_id: "asr_fasterwhisper_large_v3"
+    beam_size: 5
+    vad_guided: true
+    chunking:
+      target_minutes: 8
+      max_minutes: 10
+      split_on_silence_ms: 900
+      overlap_seconds: 0.5
+    bilingual:
+      detect_language: true
+      per_chunk_language: true
+
+  diarization:
+    embedding_model_id: "spkrec_ecapa_voxceleb"
+    window_seconds: 3.0
+    hop_seconds: 1.5
+    clustering:
+      max_speakers: 6
+      min_speaker_seconds: 60
+
+  speaker_id:
+    mode: "strict"
+    global_threshold: 0.74
+    min_margin_to_second_best: 0.06
+    unknown_if_low_confidence: true
+    intro_name_mining:
+      enabled: true
+      first_minutes: 10
+
+  features:
+    acoustic: true
+    linguistic: true
+
+limits:
+  max_items_per_job: 3
+  max_total_audio_minutes: 240
+  max_audio_bytes: 2500000000
+  max_parallel_chunks: 3
+  max_download_retries: 4
+  backoff_initial_seconds: 5
+  backoff_max_seconds: 60
+
+results:
+  run:
+    github_run_url: ""
+    started_at: ""
+    finished_at: ""
+  outputs: []
+  notes: []
+  errors: []

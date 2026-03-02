@@ -1,0 +1,254 @@
+{
+  "schema_version": "1.0",
+  "job_id": "test_12min",
+  "item_id": "ep1",
+  "by_speaker": {
+    "UNKNOWN_2": {
+      "acoustic": {
+        "speech_seconds": 572.25,
+        "silence_seconds": 201.487,
+        "speech_ratio": 0.7396,
+        "mean_segment_seconds": 1.946
+      },
+      "linguistic": {
+        "token_count": 1579,
+        "type_count": 508,
+        "ttr": 0.3217,
+        "muletillas_es": {
+          "eh": 0,
+          "este": 11,
+          "o sea": 1,
+          "vale": 2,
+          "pues": 8,
+          "en plan": 0,
+          "¿sabes?": 0,
+          "digamos": 2
+        },
+        "muletillas_en": {
+          "um": 2,
+          "uh": 0,
+          "like": 0,
+          "you know": 0,
+          "i mean": 0,
+          "well": 0
+        },
+        "top_terms": [
+          [
+            "que",
+            91
+          ],
+          [
+            "una",
+            26
+          ],
+          [
+            "estrella",
+            22
+          ],
+          [
+            "las",
+            16
+          ],
+          [
+            "años",
+            14
+          ],
+          [
+            "muy",
+            13
+          ],
+          [
+            "pero",
+            12
+          ],
+          [
+            "los",
+            11
+          ],
+          [
+            "bueno",
+            10
+          ],
+          [
+            "este",
+            10
+          ],
+          [
+            "está",
+            10
+          ],
+          [
+            "millones",
+            10
+          ],
+          [
+            "todo",
+            9
+          ],
+          [
+            "esto",
+            9
+          ],
+          [
+            "porque",
+            9
+          ]
+        ]
+      }
+    },
+    "UNKNOWN_1": {
+      "acoustic": {
+        "speech_seconds": 572.25,
+        "silence_seconds": 201.487,
+        "speech_ratio": 0.7396,
+        "mean_segment_seconds": 1.946
+      },
+      "linguistic": {
+        "token_count": 1044,
+        "type_count": 399,
+        "ttr": 0.3822,
+        "muletillas_es": {
+          "eh": 0,
+          "este": 3,
+          "o sea": 2,
+          "vale": 3,
+          "pues": 6,
+          "en plan": 0,
+          "¿sabes?": 0,
+          "digamos": 1
+        },
+        "muletillas_en": {
+          "um": 5,
+          "uh": 0,
+          "like": 0,
+          "you know": 0,
+          "i mean": 0,
+          "well": 0
+        },
+        "top_terms": [
+          [
+            "que",
+            60
+          ],
+          [
+            "una",
+            16
+          ],
+          [
+            "pero",
+            11
+          ],
+          [
+            "más",
+            11
+          ],
+          [
+            "porque",
+            10
+          ],
+          [
+            "esto",
+            10
+          ],
+          [
+            "muy",
+            9
+          ],
+          [
+            "claro",
+            8
+          ],
+          [
+            "por",
+            8
+          ],
+          [
+            "estrella",
+            8
+          ],
+          [
+            "agujero",
+            8
+          ],
+          [
+            "negro",
+            8
+          ],
+          [
+            "las",
+            7
+          ],
+          [
+            "entonces",
+            7
+          ],
+          [
+            "los",
+            6
+          ]
+        ]
+      }
+    },
+    "UNKNOWN_3": {
+      "acoustic": {
+        "speech_seconds": 572.25,
+        "silence_seconds": 201.487,
+        "speech_ratio": 0.7396,
+        "mean_segment_seconds": 1.946
+      },
+      "linguistic": {
+        "token_count": 11,
+        "type_count": 11,
+        "ttr": 1.0,
+        "muletillas_es": {
+          "eh": 0,
+          "este": 0,
+          "o sea": 1,
+          "vale": 0,
+          "pues": 0,
+          "en plan": 0,
+          "¿sabes?": 0,
+          "digamos": 0
+        },
+        "muletillas_en": {
+          "um": 0,
+          "uh": 0,
+          "like": 0,
+          "you know": 0,
+          "i mean": 0,
+          "well": 0
+        },
+        "top_terms": [
+          [
+            "tengo",
+            1
+          ],
+          [
+            "planeado",
+            1
+          ],
+          [
+            "sea",
+            1
+          ],
+          [
+            "tierra",
+            1
+          ],
+          [
+            "desaparecerá",
+            1
+          ],
+          [
+            "por",
+            1
+          ],
+          [
+            "esto",
+            1
+          ]
+        ]
+      }
+    }
+  }
+}

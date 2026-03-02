@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "job_id": "test_12min",
+  "item_id": "ep1",
+  "podcast": "Prueba",
+  "episode_title": "Audio 12 min",
+  "episode_slug": "audio-12-min",
+  "source": {
+    "type": "direct_url",
+    "url": "https://audio.ivoox.com/audio/0/9/0/9/apariciorbitas08e25supernovasfallida-cienciaalbertoaparici-ivoox169269090.mp3?secure=ytGBJV3ofro1fhBMszV-eg==,1772494309"
+  },
+  "audio": {
+    "duration_seconds": 773.737125,
+    "sample_rate_hz": 16000,
+    "sha256": "9fc7b1fa2baae0995564f7837c309935ef060dca055a2245d8bf6b61e672abb6"
+  },
+  "models": {
+    "asr_model_id": "asr_fasterwhisper_large_v3",
+    "speaker_embedding_model_id": "spkrec_ecapa_voxceleb"
+  },
+  "language": {
+    "mode": "es",
+    "detected": {
+      "es": 0.9999999989999999
+    },
+    "confidence": 0.9977786739667257
+  },
+  "chunk_plan": [
+    {
+      "chunk_id": "chunk_000",
+      "start": 1.0,
+      "end": 770.95
+    }
+  ]
+}

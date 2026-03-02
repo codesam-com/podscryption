@@ -1,0 +1,43 @@
+schema_version: '1.0'
+job_id: test_12min
+status: needs_user_input
+unknowns:
+- unknown_id: UNKNOWN_1
+  cluster_id: SPEAKER_0
+  candidates: []
+  questions:
+  - timecode: '00:00:13.680'
+    text: y es verdad
+    fill_alias: ''
+  - timecode: '00:00:14.080'
+    text: Alberto Parisi
+    fill_alias: ''
+  - timecode: '00:05:52.700'
+    text: sí está hecho
+    fill_alias: ''
+- unknown_id: UNKNOWN_2
+  cluster_id: SPEAKER_1
+  candidates: []
+  questions:
+  - timecode: '00:00:01.000'
+    text: y a Carlos que venías
+    fill_alias: ''
+  - timecode: '00:00:15.380'
+    text: claro que vengo
+    fill_alias: ''
+  - timecode: '00:06:32.780'
+    text: solo es el núcleo de la estrella
+    fill_alias: ''
+- unknown_id: UNKNOWN_3
+  cluster_id: SPEAKER_2
+  candidates: []
+  questions:
+  - timecode: '00:11:33.920'
+    text: no lo tengo planeado
+    fill_alias: ''
+  - timecode: '00:11:36.320'
+    text: o sea la Tierra
+    fill_alias: ''
+  - timecode: '00:11:36.320'
+    text: o sea la Tierra
+    fill_alias: ''

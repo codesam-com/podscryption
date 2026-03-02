@@ -59,6 +59,8 @@ results:
   run:
     started_at: '2026-03-02T22:06:25.233698'
     finished_at: '2026-03-02T22:25:38.745068'
+    resolve_started_at: '2026-03-02T23:59:33.785497'
+    resolve_finished_at: '2026-03-02T23:59:33.803291'
   outputs:
   - item_id: ep1
     podcast: Prueba
@@ -68,5 +70,6 @@ results:
     features_by_speaker_json: outputs/prueba/audio-12-min/features_by_speaker.json
     transcript_segments_json: outputs/prueba/audio-12-min/transcript_segments.json
     review_unknowns_yaml: review/test_12min_unknowns.yaml
-  notes: []
+  notes:
+  - 'Round2 review generated due to cluster conflicts: review/test_12min_unknowns_round2.yaml'
   errors: []

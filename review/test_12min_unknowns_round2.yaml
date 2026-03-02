@@ -1,0 +1,39 @@
+schema_version: '1.0'
+job_id: test_12min
+status: needs_user_input
+purpose: Conflicts found within same diarization cluster. Majority vote applied for
+  now. If you confirm the outlier alias, it implies cluster split (not yet automatic).
+conflicts:
+- cluster_id: SPEAKER_0
+  majority_alias: Begoña
+  chosen_alias: Alberto Aparisi
+  timecode: '00:05:52.700'
+  text: sí está hecho
+- cluster_id: SPEAKER_1
+  majority_alias: Alberto Aparisi
+  chosen_alias: Begoña
+  timecode: '00:00:01.000'
+  text: y a Carlos que venías
+- cluster_id: SPEAKER_2
+  majority_alias: Tipa
+  chosen_alias: Alberto Aparisi
+  timecode: '00:11:33.920'
+  text: no lo tengo planeado
+instructions:
+- For each conflict, set fill_alias to either the majority_alias (accept) or another
+  alias (requires split).
+- If you choose another alias, keep it consistent across same cluster_id/timecodes
+  you want reassigned.
+fill:
+- cluster_id: SPEAKER_0
+  timecode: '00:05:52.700'
+  text: sí está hecho
+  fill_alias: ''
+- cluster_id: SPEAKER_1
+  timecode: '00:00:01.000'
+  text: y a Carlos que venías
+  fill_alias: ''
+- cluster_id: SPEAKER_2
+  timecode: '00:11:33.920'
+  text: no lo tengo planeado
+  fill_alias: ''

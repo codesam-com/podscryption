@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EpisodeManifest",
+  "type": "object",
+  "required": ["schema_version", "job_id", "item_id", "podcast", "episode_slug", "source", "audio", "models", "chunk_plan", "language"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "job_id": { "type": "string" },
+    "item_id": { "type": "string" },
+    "podcast": { "type": "string" },
+    "episode_title": { "type": "string" },
+    "episode_slug": { "type": "string" },
+    "source": {
+      "type": "object",
+      "required": ["type", "url"],
+      "properties": {
+        "type": { "type": "string" },
+        "url": { "type": "string" }
+      }
+    },
+    "audio": {
+      "type": "object",
+      "required": ["duration_seconds", "sample_rate_hz"],
+      "properties": {
+        "duration_seconds": { "type": "number" },
+        "sample_rate_hz": { "type": "integer" },
+        "sha256": { "type": "string" }
+      }
+    },
+    "models": {
+      "type": "object",
+      "properties": {
+        "asr_model_id": { "type": "string" },
+        "speaker_embedding_model_id": { "type": "string" }
+      }
+    },
+    "language": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["es", "en", "mixed", "auto"] },
+        "detected": { "type": "string" },
+        "confidence": { "type": "number" }
+      }
+    },
+    "chunk_plan": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["chunk_id", "start", "end"],
+        "properties": {
+          "chunk_id": { "type": "string" },
+          "start": { "type": "number" },
+          "end": { "type": "number" },
+          "language": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,89 @@
+name: podscription_resolve_unknowns
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "Job file id (without extension) inside jobs/"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: podscription-resolve-${{ github.event.inputs.job_id }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      PYTHONUNBUFFERED: "1"
+      PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
+      VENV_DIR: ${{ github.workspace }}/.cache/venv
+      HF_HOME: ${{ github.workspace }}/.cache/hf
+      SPEECHBRAIN_CACHE: ${{ github.workspace }}/.cache/speechbrain
+      WORK_ROOT: ${{ github.workspace }}/.work
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Cache Python deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/pip
+            .cache/venv
+          key: v1-${{ runner.os }}-py311-deps-${{ hashFiles('requirements.lock') }}
+          restore-keys: |
+            v1-${{ runner.os }}-py311-deps-
+
+      - name: Cache models (HF + SpeechBrain)
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/hf
+            .cache/speechbrain
+          key: v1-${{ runner.os }}-models-${{ hashFiles('models/models.yaml') }}
+          restore-keys: |
+            v1-${{ runner.os }}-models-
+
+      - name: Create/Reuse venv
+        run: |
+          if [ ! -d "${VENV_DIR}" ]; then
+            python -m venv "${VENV_DIR}"
+          fi
+          "${VENV_DIR}/bin/python" -m pip install --upgrade pip
+
+      - name: Install Python requirements
+        run: |
+          "${VENV_DIR}/bin/pip" install -r requirements.lock
+
+      - name: Resolve UNKNOWNs
+        run: |
+          "${VENV_DIR}/bin/python" -m podscription resolve "jobs/${{ github.event.inputs.job_id }}.yaml"
+
+      - name: Commit resolved outputs
+        run: |
+          set -e
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "podscryption-bot"
+            git config user.email "podscryption-bot@users.noreply.github.com"
+            git add jobs profiles outputs review docs schemas models podscription || true
+            git commit -m "podscryption: resolve ${{ github.event.inputs.job_id }} [skip ci]"
+            git push
+          else
+            echo "No changes to commit."
+          fi

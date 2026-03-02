@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FeaturesBySpeaker",
+  "type": "object",
+  "required": ["schema_version", "job_id", "item_id", "by_speaker"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "job_id": { "type": "string" },
+    "item_id": { "type": "string" },
+    "by_speaker": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "acoustic": { "type": "object" },
+          "linguistic": { "type": "object" }
+        }
+      }
+    }
+  }
+}

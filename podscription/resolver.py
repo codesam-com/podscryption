@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -8,12 +9,30 @@ from typing import Any, Dict, List, Tuple
 import yaml
 
 from podscription.jobfile import load_job, ensure_job_defaults
-from podscription.pipeline import render_srt
+from podscription.pipeline import render_srt, format_srt_time
 from podscription.profiles import load_profiles, new_profile, update_profile_with_cluster
 
 
 def _load_json(path: Path) -> Dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _dump_json(path: Path, obj: Dict[str, Any]) -> None:
+    path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _majority_vote(aliases: List[str]) -> Tuple[str, Dict[str, int]]:
+    """
+    Returns (majority_alias, counts).
+    Tie-break: pick lexicographically smallest to be deterministic.
+    """
+    counts = Counter([a.strip() for a in aliases if a and a.strip()])
+    if not counts:
+        return ("", {})
+    top = counts.most_common()
+    best_n = top[0][1]
+    tied = sorted([a for a, n in top if n == best_n])
+    return (tied[0], dict(counts))
 
 
 def resolve_unknowns(job_path: Path) -> None:
@@ -28,7 +47,6 @@ def resolve_unknowns(job_path: Path) -> None:
     if not outputs:
         raise RuntimeError("No outputs recorded in job; run the job first.")
 
-    # Review file convention: review/<job_id>_unknowns.yaml
     review_path = Path("review") / f"{job_id}_unknowns.yaml"
     if not review_path.exists():
         raise RuntimeError(f"Review file not found: {review_path}")
@@ -38,23 +56,52 @@ def resolve_unknowns(job_path: Path) -> None:
         raise RuntimeError("Invalid review file schema.")
 
     unknowns = review.get("unknowns", [])
-    # Build mapping cluster_id -> alias from filled answers
-    # Rule: if multiple questions filled with different aliases, treat as error.
+    if not isinstance(unknowns, list):
+        raise RuntimeError("Invalid review file: unknowns must be a list.")
+
+    # Build mapping cluster_id -> majority alias
     cluster_to_alias: Dict[str, str] = {}
+
+    # Collect conflicts to produce round2 review
+    round2_conflicts: List[Dict[str, Any]] = []
+
     for u in unknowns:
         cid = u.get("cluster_id")
         if not cid:
             continue
-        fills = []
-        for q in (u.get("questions") or []):
+
+        qlist = u.get("questions") or []
+        if not isinstance(qlist, list):
+            continue
+
+        fills: List[str] = []
+        by_question: List[Tuple[Dict[str, Any], str]] = []
+        for q in qlist:
+            if not isinstance(q, dict):
+                continue
             a = (q.get("fill_alias") or "").strip()
             if a:
                 fills.append(a)
-        fills = list(dict.fromkeys(fills))
-        if len(fills) == 1:
-            cluster_to_alias[cid] = fills[0]
-        elif len(fills) > 1:
-            raise RuntimeError(f"Conflicting aliases for {cid}: {fills}")
+                by_question.append((q, a))
+
+        if not fills:
+            continue
+
+        maj, counts = _majority_vote(fills)
+        if not maj:
+            continue
+        cluster_to_alias[cid] = maj
+
+        # Anything not equal to majority goes into round2 conflicts
+        for q, a in by_question:
+            if a != maj:
+                round2_conflicts.append({
+                    "cluster_id": cid,
+                    "majority_alias": maj,
+                    "chosen_alias": a,
+                    "timecode": q.get("timecode") or "",
+                    "text": q.get("text") or ""
+                })
 
     if not cluster_to_alias:
         raise RuntimeError("No aliases filled in review file.")
@@ -97,11 +144,11 @@ def resolve_unknowns(job_path: Path) -> None:
         srt_text = render_srt(segments)
         Path(out_srt).write_text(srt_text, encoding="utf-8")
 
-        # Update diarization clusters metadata assigned_alias + update profiles
-        # We need cluster centroids from diar["clusters"]
+        # Update diarization clusters metadata + update profiles
         cluster_infos = {c["cluster_id"]: c for c in diar.get("clusters", []) if "cluster_id" in c}
-        # Build anchors from transcript segments
-        by_cluster = {}
+
+        # Anchors from transcript segments
+        by_cluster: Dict[str, List[Dict[str, Any]]] = {}
         for s in segments:
             by_cluster.setdefault(s["cluster_id"], []).append(s)
 
@@ -125,7 +172,7 @@ def resolve_unknowns(job_path: Path) -> None:
                 if len(s.get("text", "")) >= 10:
                     anchors.append({"timecode": float(s["start"]), "text": s["text"][:140]})
 
-            # Update profile with features if available
+            # Episode features if available
             feat_path = Path(o.get("features_by_speaker_json", ""))
             episode_feats = {}
             if feat_path.exists():
@@ -140,9 +187,37 @@ def resolve_unknowns(job_path: Path) -> None:
             update_profile_with_cluster(prof, centroid, speech_seconds, anchors, episode_ref, episode_feats)
 
         # Write updated JSON back
-        diar_path.write_text(json.dumps(diar, ensure_ascii=False, indent=2), encoding="utf-8")
-        seg_path.write_text(json.dumps(tseg, ensure_ascii=False, indent=2), encoding="utf-8")
+        _dump_json(diar_path, diar)
+        _dump_json(seg_path, tseg)
 
-    raw["status"] = "done"
+    # If conflicts exist, write round2 review
+    round2_path = Path("review") / f"{job_id}_unknowns_round2.yaml"
+    if round2_conflicts:
+        payload = {
+            "schema_version": "1.0",
+            "job_id": job_id,
+            "status": "needs_user_input",
+            "purpose": "Conflicts found within same diarization cluster. Majority vote applied for now. "
+                       "If you confirm the outlier alias, it implies cluster split (not yet automatic).",
+            "conflicts": round2_conflicts,
+            "instructions": [
+                "For each conflict, set fill_alias to either the majority_alias (accept) or another alias (requires split).",
+                "If you choose another alias, keep it consistent across same cluster_id/timecodes you want reassigned."
+            ],
+            "fill": [
+                {"cluster_id": c["cluster_id"], "timecode": c["timecode"], "text": c["text"], "fill_alias": ""}
+                for c in round2_conflicts
+            ]
+        }
+        round2_path.parent.mkdir(parents=True, exist_ok=True)
+        round2_path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True), encoding="utf-8")
+
+        raw["status"] = "awaiting_review"
+        raw["results"]["notes"].append(
+            f"Round2 review generated due to cluster conflicts: {round2_path.as_posix()}"
+        )
+    else:
+        raw["status"] = "done"
+
     raw["results"]["run"]["resolve_finished_at"] = datetime.now().isoformat()
     job.save()

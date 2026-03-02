@@ -5,6 +5,9 @@ numpy==2.1.1
 scipy==1.14.1
 soundfile==0.12.1
 
+# Hugging Face hub (PIN REQUIRED: SpeechBrain passes use_auth_token; removed in hub v1.0)
+huggingface_hub==0.36.2
+
 # ML
 scikit-learn==1.5.1
 torch==2.4.1

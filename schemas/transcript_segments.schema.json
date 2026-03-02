@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TranscriptSegments",
+  "type": "object",
+  "required": ["schema_version", "job_id", "item_id", "segments"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "job_id": { "type": "string" },
+    "item_id": { "type": "string" },
+    "segments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["start", "end", "text", "cluster_id", "speaker_label"],
+        "properties": {
+          "start": { "type": "number" },
+          "end": { "type": "number" },
+          "text": { "type": "string" },
+          "cluster_id": { "type": "string" },
+          "speaker_label": { "type": "string" },
+          "language": { "type": "string" },
+          "confidence": { "type": "number" }
+        }
+      }
+    }
+  }
+}

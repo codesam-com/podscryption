@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
 import re
 import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import requests
 import soundfile as sf
+import torch
 import yaml
 from sklearn.cluster import AgglomerativeClustering
 
@@ -48,13 +48,21 @@ def sanitize_slug(s: str) -> str:
 def run(cmd: List[str]) -> None:
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if p.returncode != 0:
-        raise RuntimeError(f"Command failed: {' '.join(cmd)}\nSTDOUT:\n{p.stdout}\nSTDERR:\n{p.stderr}")
+        raise RuntimeError(
+            f"Command failed: {' '.join(cmd)}\nSTDOUT:\n{p.stdout}\nSTDERR:\n{p.stderr}"
+        )
 
 
 def ffprobe_duration_seconds(audio_path: Path) -> float:
     cmd = [
-        "ffprobe", "-v", "error", "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1", str(audio_path)
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(audio_path),
     ]
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if p.returncode != 0:
@@ -90,7 +98,7 @@ def download_with_retries(url: str, dest: Path, max_retries: int, backoff0: int,
             return
         except Exception as e:
             last_err = e
-            sleep = min(backoff_max, backoff0 * (2 ** i)) + np.random.rand()
+            sleep = min(backoff_max, backoff0 * (2 ** i)) + float(np.random.rand())
             time.sleep(float(sleep))
     raise RuntimeError(f"Failed to download after {max_retries} retries: {url}\n{last_err}")
 
@@ -127,7 +135,7 @@ def download_gdrive_public(url: str, dest: Path, max_retries: int, backoff0: int
         try:
             resp = sess.get(base, stream=True, timeout=60, headers=headers)
             if "text/html" in resp.headers.get("Content-Type", ""):
-                # Try to find confirm token in HTML for large files
+                # confirm token for large files
                 text = resp.text
                 m = re.search(r"confirm=([0-9A-Za-z_]+)", text)
                 if m:
@@ -137,7 +145,7 @@ def download_gdrive_public(url: str, dest: Path, max_retries: int, backoff0: int
             return
         except Exception as e:
             last_err = e
-            sleep = min(backoff_max, backoff0 * (2 ** i)) + np.random.rand()
+            sleep = min(backoff_max, backoff0 * (2 ** i)) + float(np.random.rand())
             time.sleep(float(sleep))
     raise RuntimeError(f"Failed to download GDrive after {max_retries} retries: {url}\n{last_err}")
 
@@ -163,8 +171,6 @@ def ingest_audio(source: Dict[str, Any], dest: Path, allow_ivoox: bool, limits: 
     if t == "ivoox_page":
         if not allow_ivoox:
             raise RuntimeError("iVoox ingest disabled (options.ingest.allow_ivoox=false).")
-        # Best effort via yt-dlp (may violate ToS; use conservatively).
-        # We do not cache audio; only download once per run.
         dest.parent.mkdir(parents=True, exist_ok=True)
         cmd = ["yt-dlp", "-f", "bestaudio/best", "-o", str(dest), url]
         run(cmd)
@@ -174,17 +180,16 @@ def ingest_audio(source: Dict[str, Any], dest: Path, allow_ivoox: bool, limits: 
 
 
 # --------------------------
-# VAD (simple energy-based + optional WebRTC VAD)
+# VAD (simple energy-based)
 # --------------------------
 
 def compute_rms_energy(x: np.ndarray, frame: int = 1600, hop: int = 800) -> np.ndarray:
-    # 16kHz default -> 0.1s frames with 0.05 hop
     x = x.astype(np.float32)
     n = max(1, 1 + (len(x) - frame) // hop)
     e = np.empty(n, dtype=np.float32)
     for i in range(n):
         s = i * hop
-        f = x[s:s+frame]
+        f = x[s : s + frame]
         e[i] = float(np.sqrt(np.mean(f * f) + 1e-12))
     return e
 
@@ -212,7 +217,6 @@ def vad_intervals(wav_path: Path, sr: int = 16000, threshold_quantile: float = 0
     if start is not None:
         intervals.append((start, len(mask)))
 
-    # Convert to seconds, merge close gaps
     out: List[Tuple[float, float]] = []
     for a, b in intervals:
         s = a * hop / sr
@@ -230,7 +234,6 @@ def vad_intervals(wav_path: Path, sr: int = 16000, threshold_quantile: float = 0
         else:
             merged.append((s, t))
 
-    # Drop tiny
     merged = [(s, t) for s, t in merged if (t - s) >= 0.30]
     return merged
 
@@ -245,7 +248,7 @@ def build_chunk_plan(
     max_minutes: float,
     split_on_silence_ms: int,
     overlap_seconds: float,
-    total_duration: float
+    total_duration: float,
 ) -> List[Tuple[float, float]]:
     target = target_minutes * 60.0
     maxd = max_minutes * 60.0
@@ -256,11 +259,10 @@ def build_chunk_plan(
     cur_start = speech[0][0]
     cur_end = cur_start
 
-    # Build by accumulating speech intervals, cutting at natural gaps (silence)
     for (s, t) in speech:
         if s < cur_start:
             cur_start = s
-        # If adding this speech interval exceeds target, close chunk at previous end
+
         if (t - cur_start) >= target and (cur_end - cur_start) >= 60.0:
             end = cur_end
             chunks.append((max(0.0, cur_start - overlap_seconds), min(total_duration, end + overlap_seconds)))
@@ -269,7 +271,6 @@ def build_chunk_plan(
         else:
             cur_end = t
 
-        # Hard cap
         if (cur_end - cur_start) >= maxd:
             end = cur_start + maxd
             chunks.append((max(0.0, cur_start - overlap_seconds), min(total_duration, end + overlap_seconds)))
@@ -279,11 +280,11 @@ def build_chunk_plan(
     if cur_end > cur_start + 10.0:
         chunks.append((max(0.0, cur_start - overlap_seconds), min(total_duration, cur_end + overlap_seconds)))
 
-    # Ensure sorted, merged if overlaps too much
     chunks2: List[Tuple[float, float]] = []
     for s, t in sorted(chunks):
         if not chunks2:
-            chunks2.append((s, t)); continue
+            chunks2.append((s, t))
+            continue
         ps, pt = chunks2[-1]
         if s <= pt:
             chunks2[-1] = (ps, max(pt, t))
@@ -310,8 +311,12 @@ def extract_embeddings(
     window: float,
     hop: float,
     encoder: EncoderClassifier,
-    sr: int = 16000
+    sr: int = 16000,
 ) -> Tuple[np.ndarray, List[Tuple[float, float]]]:
+    """
+    Extract SpeechBrain ECAPA embeddings from VAD speech intervals.
+    IMPORTANT: SpeechBrain expects torch Tensors (not numpy).
+    """
     x, file_sr = sf.read(str(wav_path))
     if file_sr != sr:
         raise ValueError(f"Expected {sr}Hz wav, got {file_sr}.")
@@ -322,22 +327,38 @@ def extract_embeddings(
     windows: List[Tuple[float, float]] = []
     feats: List[np.ndarray] = []
 
+    # Make sure model is on CPU for GH runners
+    encoder = encoder.to(torch.device("cpu"))
+
     for (s0, t0) in speech:
         s = s0
         while s + window <= t0:
             a = int(s * sr)
             b = int((s + window) * sr)
             seg = x[a:b]
-            # speechbrain expects torch tensor shape [batch, time]
-            emb = encoder.encode_batch(np.expand_dims(seg, axis=0)).squeeze().detach().cpu().numpy()
+
+            seg_t = torch.from_numpy(seg).unsqueeze(0)  # [1, T]
+            if seg_t.dtype != torch.float32:
+                seg_t = seg_t.float()
+
+            # SpeechBrain returns torch tensor; convert to numpy
+            emb_t = encoder.encode_batch(seg_t)
+            emb = emb_t.squeeze().detach().cpu().numpy()
+
             feats.append(emb.astype(np.float32))
             windows.append((s, s + window))
             s += hop
 
     if not feats:
-        # fallback: whole file
-        emb = encoder.encode_batch(np.expand_dims(x, axis=0)).squeeze().detach().cpu().numpy()
-        return np.expand_dims(emb.astype(np.float32), 0), [(0.0, min(float(len(x)/sr), 10.0))]
+        # fallback: whole file (cap to 20s if enormous to avoid slow encode)
+        cap_seconds = min(float(len(x) / sr), 20.0)
+        x_cap = x[: int(cap_seconds * sr)]
+        x_t = torch.from_numpy(x_cap).unsqueeze(0)
+        if x_t.dtype != torch.float32:
+            x_t = x_t.float()
+        emb_t = encoder.encode_batch(x_t)
+        emb = emb_t.squeeze().detach().cpu().numpy()
+        return np.expand_dims(emb.astype(np.float32), 0), [(0.0, cap_seconds)]
 
     return np.stack(feats, axis=0), windows
 
@@ -345,19 +366,14 @@ def extract_embeddings(
 def diarize(
     embeddings: np.ndarray,
     windows: List[Tuple[float, float]],
-    max_speakers: int
+    max_speakers: int,
 ) -> Tuple[List[Dict[str, Any]], List[ClusterInfo]]:
-    # AHC with cosine metric
-    # We pick number of clusters by distance threshold heuristic if max_speakers unknown.
-    # For simplicity: try k=1..max_speakers and choose minimal k where intra-cluster tightness stops improving.
     best_k = 1
     best_score = float("inf")
 
-    # Precompute normalized embeddings
     E = embeddings / (np.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-12)
 
     def tightness(labels: np.ndarray) -> float:
-        # mean cosine distance to centroid
         val = 0.0
         for k in np.unique(labels):
             idx = np.where(labels == k)[0]
@@ -373,7 +389,6 @@ def diarize(
         model = AgglomerativeClustering(n_clusters=k, metric="cosine", linkage="average")
         labels = model.fit_predict(E)
         t = tightness(labels)
-        # choose k with best tightness but penalize complexity
         score = t + 0.02 * k
         if score < best_score:
             best_score = score
@@ -382,35 +397,38 @@ def diarize(
     model = AgglomerativeClustering(n_clusters=best_k, metric="cosine", linkage="average")
     labels = model.fit_predict(E)
 
-    # Build per-window segments (then merge)
     per_win = []
     for (s, t), lab in zip(windows, labels):
         per_win.append({"start": float(s), "end": float(t), "cluster_id": f"SPEAKER_{int(lab)}"})
 
-    # Merge contiguous windows w same label
     merged: List[Dict[str, Any]] = []
     for seg in per_win:
         if not merged:
-            merged.append(seg); continue
+            merged.append(seg)
+            continue
         last = merged[-1]
         if seg["cluster_id"] == last["cluster_id"] and seg["start"] <= last["end"] + 0.15:
             last["end"] = max(last["end"], seg["end"])
         else:
             merged.append(seg)
 
-    # Build cluster infos
     clusters: List[ClusterInfo] = []
     for lab in sorted(set(labels.tolist())):
         idx = np.where(labels == lab)[0]
         cid = f"SPEAKER_{int(lab)}"
         centroid = E[idx].mean(axis=0)
         centroid = centroid / (np.linalg.norm(centroid) + 1e-12)
-        # speech seconds approximated by merged segments for this cluster
         spk_secs = sum((s["end"] - s["start"]) for s in merged if s["cluster_id"] == cid)
-        # tightness per cluster
         d = 1.0 - (E[idx] @ centroid)
         tight = float(d.mean()) if len(idx) > 0 else 1.0
-        clusters.append(ClusterInfo(cluster_id=cid, speech_seconds=float(spk_secs), centroid=centroid.astype(float).tolist(), tightness=tight))
+        clusters.append(
+            ClusterInfo(
+                cluster_id=cid,
+                speech_seconds=float(spk_secs),
+                centroid=centroid.astype(float).tolist(),
+                tightness=tight,
+            )
+        )
     return merged, clusters
 
 
@@ -419,17 +437,28 @@ def diarize(
 # --------------------------
 
 def detect_language_quick(model: WhisperModel, wav_path: Path, duration: float) -> Tuple[str, float]:
-    # sample 3 short windows (20s) across file
-    pts = [min(30.0, max(0.0, duration * 0.05)),
-           min(duration - 25.0, max(0.0, duration * 0.50)),
-           min(duration - 25.0, max(0.0, duration * 0.90))]
+    pts = [
+        min(30.0, max(0.0, duration * 0.05)),
+        min(duration - 25.0, max(0.0, duration * 0.50)),
+        min(duration - 25.0, max(0.0, duration * 0.90)),
+    ]
     langs = []
     for s in pts:
-        segments, info = model.transcribe(str(wav_path), vad_filter=False, beam_size=1, language=None, task="transcribe",
-                                          temperature=0.0, condition_on_previous_text=False, initial_prompt=None,
-                                          word_timestamps=False, vad_parameters=None, clip_timestamps=f"{s},{s+20.0}")
+        segments, info = model.transcribe(
+            str(wav_path),
+            vad_filter=False,
+            beam_size=1,
+            language=None,
+            task="transcribe",
+            temperature=0.0,
+            condition_on_previous_text=False,
+            initial_prompt=None,
+            word_timestamps=False,
+            vad_parameters=None,
+            clip_timestamps=f"{s},{s+20.0}",
+        )
         langs.append((info.language or "unknown", float(info.language_probability or 0.0)))
-    # pick majority by summed probability
+
     agg: Dict[str, float] = {}
     for l, p in langs:
         agg[l] = agg.get(l, 0.0) + p
@@ -443,7 +472,7 @@ def transcribe_chunks(
     chunks: List[Tuple[float, float]],
     beam_size: int,
     language_mode: str,
-    per_chunk_language: bool
+    per_chunk_language: bool,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     lang_summary: Dict[str, float] = {}
@@ -454,7 +483,6 @@ def transcribe_chunks(
         if language_mode in ("es", "en"):
             lang = language_mode
         elif per_chunk_language and language_mode in ("auto", "mixed"):
-            # Let whisper decide; faster-whisper returns info.language
             lang = None
 
         segments, info = model.transcribe(
@@ -466,7 +494,7 @@ def transcribe_chunks(
             temperature=0.0,
             condition_on_previous_text=True,
             word_timestamps=False,
-            clip_timestamps=clip
+            clip_timestamps=clip,
         )
 
         detected = info.language or "unknown"
@@ -474,16 +502,17 @@ def transcribe_chunks(
         lang_summary[detected] = lang_summary.get(detected, 0.0) + prob
 
         for seg in segments:
-            out.append({
-                "start": float(seg.start),
-                "end": float(seg.end),
-                "text": (seg.text or "").strip(),
-                "language": detected,
-                "confidence": prob,
-                "chunk_id": f"chunk_{i:03d}"
-            })
+            out.append(
+                {
+                    "start": float(seg.start),
+                    "end": float(seg.end),
+                    "text": (seg.text or "").strip(),
+                    "language": detected,
+                    "confidence": prob,
+                    "chunk_id": f"chunk_{i:03d}",
+                }
+            )
 
-    # normalize lang summary
     total = sum(lang_summary.values()) + 1e-9
     for k in list(lang_summary.keys()):
         lang_summary[k] /= total
@@ -507,8 +536,7 @@ def assign_cluster_to_asr_segment(asr_seg: Dict[str, Any], diar_segments: List[D
     if not overlaps:
         return diar_segments[0]["cluster_id"] if diar_segments else "SPEAKER_0"
     best = max(overlaps.items(), key=lambda kv: kv[1])[0]
-    cov = overlaps[best] / (t - s + 1e-9)
-    return best if cov >= 0.60 else best  # keep best but later may reduce confidence
+    return best
 
 
 # --------------------------
@@ -519,17 +547,16 @@ INTRO_PATTERNS_ES = [
     r"\bsoy\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ-]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ-]+){0,2})\b",
     r"\bme\s+llamo\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ-]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ-]+){0,2})\b",
     r"\bcon\s+nosotros\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ-]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ-]+){0,2})\b",
-    r"\bhoy\s+nos\s+acompaña\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ-]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ-]+){0,2})\b"
+    r"\bhoy\s+nos\s+acompaña\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ-]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ-]+){0,2})\b",
 ]
 INTRO_PATTERNS_EN = [
     r"\bi'?m\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b",
     r"\bmy\s+name\s+is\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b",
-    r"\bjoined\s+by\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b"
+    r"\bjoined\s+by\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b",
 ]
 
 
 def mine_intro_names(transcript: List[Dict[str, Any]], first_minutes: int) -> List[Tuple[str, float, str]]:
-    # returns list of (name, time, cluster_id)
     out = []
     horizon = first_minutes * 60.0
     for seg in transcript:
@@ -550,17 +577,14 @@ def strict_speaker_id(
     profiles: Dict[str, Any],
     global_threshold: float,
     min_margin: float,
-    intro_evidence: List[Tuple[str, float, str]]
+    intro_evidence: List[Tuple[str, float, str]],
 ) -> Dict[str, Dict[str, Any]]:
-    # returns mapping cluster_id -> {assigned_alias, decision, scores...}
-    # Build name->alias lookup
     name_to_alias = {}
     for alias, prof in profiles.items():
         fn = (prof.raw.get("full_name") or alias).lower()
         name_to_alias[alias.lower()] = alias
         name_to_alias[fn] = alias
 
-    # For intro evidence: per cluster -> suggested alias (if name matches)
     intro_suggest: Dict[str, str] = {}
     names_found: Dict[str, List[str]] = {}
     for name, _, cid in intro_evidence:
@@ -570,7 +594,6 @@ def strict_speaker_id(
         names_found.setdefault(cid, []).append(name)
 
     result: Dict[str, Dict[str, Any]] = {}
-    # Pre-extract profile centroids
     centroids = {}
     thresholds = {}
     for alias, prof in profiles.items():
@@ -588,14 +611,9 @@ def strict_speaker_id(
         best_alias, best_score = (scores[0] if scores else ("", 0.0))
         second_alias, second_score = (scores[1] if len(scores) > 1 else ("", 0.0))
 
-        # threshold used = max(global, personal if exists)
         personal_thr = thresholds.get(best_alias)
         thr = max(global_threshold, float(personal_thr)) if personal_thr is not None else float(global_threshold)
 
-        decision = "unknown"
-        assigned = None
-
-        # Intro evidence can help only when voice is *almost* there, and suggests same alias.
         suggested = intro_suggest.get(c.cluster_id)
         if suggested and suggested == best_alias and best_score >= (thr - 0.02) and (best_score - second_score) >= (min_margin * 0.5):
             thr_eff = thr - 0.01
@@ -618,7 +636,7 @@ def strict_speaker_id(
             "threshold_used": thr_eff,
             "margin_used": min_margin,
             "decision": decision,
-            "names_found": names_found.get(c.cluster_id, [])
+            "names_found": names_found.get(c.cluster_id, []),
         }
 
     return result
@@ -640,7 +658,6 @@ def format_srt_time(seconds: float) -> str:
 
 
 def render_srt(transcript: List[Dict[str, Any]], max_chars: int = 84) -> str:
-    # group consecutive segments with same speaker label into 1-7s blocks
     blocks = []
     cur = None
 
@@ -672,7 +689,6 @@ def render_srt(transcript: List[Dict[str, Any]], max_chars: int = 84) -> str:
     idx = 1
     for b in blocks:
         txt = f"{b['label']}: {b['text']}"
-        # naive wrap
         wrapped = []
         while len(txt) > max_chars:
             cut = txt.rfind(" ", 0, max_chars)
@@ -696,10 +712,12 @@ def render_srt(transcript: List[Dict[str, Any]], max_chars: int = 84) -> str:
 # --------------------------
 
 MUletillas_ES = ["eh", "este", "o sea", "vale", "pues", "en plan", "¿sabes?", "digamos"]
-MUletillas_EN = ["um", "uh", "like", "you know", "I mean", "well"]
+MUletillas_EN = ["um", "uh", "like", "you know", "i mean", "well"]
+
 
 def tokenize(text: str) -> List[str]:
     return re.findall(r"\b[\wáéíóúñü]+(?:'[\w]+)?\b", text.lower(), flags=re.UNICODE)
+
 
 def linguistic_features(texts: List[str]) -> Dict[str, Any]:
     full = " ".join(texts)
@@ -708,11 +726,11 @@ def linguistic_features(texts: List[str]) -> Dict[str, Any]:
         return {"token_count": 0}
     types = set(toks)
     ttr = len(types) / max(1, len(toks))
-    # muletillas counts
+
     low = full.lower()
     mu_es = {m: low.count(m) for m in MUletillas_ES}
     mu_en = {m: low.count(m) for m in MUletillas_EN}
-    # top keywords by frequency (simple)
+
     freq = {}
     for w in toks:
         if len(w) <= 2:
@@ -725,8 +743,9 @@ def linguistic_features(texts: List[str]) -> Dict[str, Any]:
         "ttr": round(float(ttr), 4),
         "muletillas_es": mu_es,
         "muletillas_en": mu_en,
-        "top_terms": top
+        "top_terms": top,
     }
+
 
 def acoustic_features_from_vad(speech: List[Tuple[float, float]], total_duration: float) -> Dict[str, Any]:
     speech_secs = sum(t - s for s, t in speech)
@@ -735,7 +754,7 @@ def acoustic_features_from_vad(speech: List[Tuple[float, float]], total_duration
         "speech_seconds": round(float(speech_secs), 3),
         "silence_seconds": round(float(silence_secs), 3),
         "speech_ratio": round(float(speech_secs / max(1e-9, total_duration)), 4),
-        "mean_segment_seconds": round(float((speech_secs / max(1, len(speech)))), 3)
+        "mean_segment_seconds": round(float((speech_secs / max(1, len(speech)))), 3),
     }
 
 
@@ -748,9 +767,8 @@ def build_review_unknowns(
     unknown_clusters: List[str],
     transcript: List[Dict[str, Any]],
     cluster_matches: Dict[str, Dict[str, Any]],
-    out_path: Path
+    out_path: Path,
 ) -> None:
-    # For each UNKNOWN cluster pick up to 3 questions (timecodes + snippet)
     unknowns = []
     by_cluster = {}
     for seg in transcript:
@@ -758,7 +776,6 @@ def build_review_unknowns(
 
     for i, cid in enumerate(unknown_clusters, start=1):
         segs = by_cluster.get(cid, [])
-        # pick 2 early + 1 later if available
         picks = []
         for s in segs[:]:
             if len(picks) >= 2:
@@ -766,15 +783,17 @@ def build_review_unknowns(
             if len(s["text"]) >= 8:
                 picks.append(s)
         if segs:
-            picks.append(segs[min(len(segs)-1, max(0, len(segs)//2))])
+            picks.append(segs[min(len(segs) - 1, max(0, len(segs) // 2))])
 
         questions = []
         for p in picks[:3]:
-            questions.append({
-                "timecode": format_srt_time(float(p["start"])).replace(",", "."),
-                "text": p["text"][:140],
-                "fill_alias": ""
-            })
+            questions.append(
+                {
+                    "timecode": format_srt_time(float(p["start"])).replace(",", "."),
+                    "text": p["text"][:140],
+                    "fill_alias": "",
+                }
+            )
 
         cand = []
         vm = cluster_matches.get(cid, {})
@@ -783,18 +802,20 @@ def build_review_unknowns(
         if vm.get("second_best_alias"):
             cand.append({"alias": vm["second_best_alias"], "score": vm.get("second_best_score", 0.0)})
 
-        unknowns.append({
-            "unknown_id": f"UNKNOWN_{i}",
-            "cluster_id": cid,
-            "candidates": cand,
-            "questions": questions
-        })
+        unknowns.append(
+            {
+                "unknown_id": f"UNKNOWN_{i}",
+                "cluster_id": cid,
+                "candidates": cand,
+                "questions": questions,
+            }
+        )
 
     payload = {
         "schema_version": "1.0",
         "job_id": job_id,
         "status": "needs_user_input",
-        "unknowns": unknowns
+        "unknowns": unknowns,
     }
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True), encoding="utf-8")
@@ -812,7 +833,7 @@ def process_episode(
     profiles_dir: Path,
     outputs_root: Path,
     review_root: Path,
-    work_root: Path
+    work_root: Path,
 ) -> Dict[str, Any]:
     item_id = item["item_id"]
     podcast = item.get("podcast", "podcast")
@@ -822,31 +843,25 @@ def process_episode(
     out_dir = outputs_root / sanitize_slug(podcast) / episode_slug
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Work dirs (NOT cached)
     wdir = work_root / job_id / item_id
     wdir.mkdir(parents=True, exist_ok=True)
 
     audio_in = wdir / "audio.input"
     audio_wav = wdir / "audio.wav"
 
-    # Ingest
     ingest_cfg = options.get("ingest", {})
     allow_ivoox = bool(ingest_cfg.get("allow_ivoox", False))
     ingest_audio(item["source"], audio_in, allow_ivoox, limits)
 
-    # Size check
     max_bytes = int(limits.get("max_audio_bytes", 2500000000))
     if audio_in.stat().st_size > max_bytes:
         raise RuntimeError(f"Audio too large ({audio_in.stat().st_size} bytes) > limit {max_bytes}")
 
-    # Normalize to wav
     to_wav_mono_16k(audio_in, audio_wav)
     dur = ffprobe_duration_seconds(audio_wav)
 
-    # VAD
     speech = vad_intervals(audio_wav, threshold_quantile=0.6)
 
-    # Chunk plan
     ch = options.get("asr", {}).get("chunking", {})
     chunks = build_chunk_plan(
         speech=speech,
@@ -854,22 +869,19 @@ def process_episode(
         max_minutes=float(ch.get("max_minutes", 10)),
         split_on_silence_ms=int(ch.get("split_on_silence_ms", 900)),
         overlap_seconds=float(ch.get("overlap_seconds", 0.5)),
-        total_duration=dur
+        total_duration=dur,
     )
 
-    # Models: SpeechBrain ECAPA
     diar_cfg = options.get("diarization", {})
     emb_model_id = diar_cfg.get("embedding_model_id", "spkrec_ecapa_voxceleb")
     encoder = EncoderClassifier.from_hparams(source="speechbrain/spkrec-ecapa-voxceleb")
 
-    # Embeddings + diarization clustering
     window = float(diar_cfg.get("window_seconds", 3.0))
     hop = float(diar_cfg.get("hop_seconds", 1.5))
     E, win = extract_embeddings(audio_wav, speech, window, hop, encoder)
     max_spk = int(diar_cfg.get("clustering", {}).get("max_speakers", 6))
     diar_segments, cluster_infos = diarize(E, win, max_spk)
 
-    # ASR: faster-whisper large-v3 (auto-download from HF Hub) :contentReference[oaicite:6]{index=6}
     asr_cfg = options.get("asr", {})
     beam = int(asr_cfg.get("beam_size", 5))
     language_hint = str(item.get("language_hint", "auto"))
@@ -880,7 +892,6 @@ def process_episode(
     model = WhisperModel("large-v3", device="cpu", compute_type="int8")
     if detect_language and language_hint == "auto":
         detected_lang, conf = detect_language_quick(model, audio_wav, dur)
-        # normalize to es/en/mixed/auto
         if detected_lang in ("es", "en"):
             language_mode = detected_lang
             lang_conf = conf
@@ -893,21 +904,22 @@ def process_episode(
 
     asr_segments, lang_meta = transcribe_chunks(model, audio_wav, chunks, beam, language_mode, per_chunk_language)
 
-    # Align: assign cluster_id to ASR segments
     transcript = []
     for seg in asr_segments:
         cid = assign_cluster_to_asr_segment(seg, diar_segments)
-        transcript.append({
-            "start": float(seg["start"]),
-            "end": float(seg["end"]),
-            "text": seg["text"],
-            "language": seg.get("language", "unknown"),
-            "confidence": float(seg.get("confidence", 0.0)),
-            "cluster_id": cid
-        })
+        transcript.append(
+            {
+                "start": float(seg["start"]),
+                "end": float(seg["end"]),
+                "text": seg["text"],
+                "language": seg.get("language", "unknown"),
+                "confidence": float(seg.get("confidence", 0.0)),
+                "cluster_id": cid,
+            }
+        )
 
-    # Speaker ID: strict, with intro name evidence as secondary
     from podscription.profiles import load_profiles
+
     profiles = load_profiles(profiles_dir)
 
     spk_cfg = options.get("speaker_id", {})
@@ -920,8 +932,6 @@ def process_episode(
     intro_evidence = mine_intro_names(transcript, first_minutes) if intro_enabled else []
     matches = strict_speaker_id(cluster_infos, profiles, global_thr, margin, intro_evidence)
 
-    # Assign labels; create UNKNOWN numbering stable in cluster order
-    unknown_map: Dict[str, str] = {}
     unknown_clusters: List[str] = []
     unk_i = 1
     for c in sorted(cluster_infos, key=lambda z: z.cluster_id):
@@ -930,7 +940,6 @@ def process_episode(
             label = str(m["assigned_alias"])
         else:
             label = f"UNKNOWN_{unk_i}"
-            unknown_map[c.cluster_id] = label
             unknown_clusters.append(c.cluster_id)
             unk_i += 1
         for seg in diar_segments:
@@ -938,11 +947,11 @@ def process_episode(
                 seg["assigned_alias"] = label
 
     for seg in transcript:
-        seg["speaker_label"] = diar_segments[0].get("assigned_alias", seg["cluster_id"]) if not seg.get("cluster_id") else (
-            next((d.get("assigned_alias") for d in diar_segments if d["cluster_id"] == seg["cluster_id"]), seg["cluster_id"])
+        seg["speaker_label"] = next(
+            (d.get("assigned_alias") for d in diar_segments if d["cluster_id"] == seg["cluster_id"]),
+            seg["cluster_id"],
         )
 
-    # Episode-level features by speaker label (observables only)
     by_speaker_text: Dict[str, List[str]] = {}
     for seg in transcript:
         by_speaker_text.setdefault(seg["speaker_label"], []).append(seg["text"])
@@ -951,10 +960,9 @@ def process_episode(
     for speaker_label, texts in by_speaker_text.items():
         features["by_speaker"][speaker_label] = {
             "acoustic": acoustic_features_from_vad(speech, dur),
-            "linguistic": linguistic_features(texts)
+            "linguistic": linguistic_features(texts),
         }
 
-    # Write outputs
     manifest = {
         "schema_version": "1.0",
         "job_id": job_id,
@@ -966,38 +974,31 @@ def process_episode(
         "audio": {"duration_seconds": dur, "sample_rate_hz": 16000, "sha256": sha256_file(audio_in)},
         "models": {"asr_model_id": "asr_fasterwhisper_large_v3", "speaker_embedding_model_id": emb_model_id},
         "language": {"mode": language_mode, "detected": (lang_meta.get("language_distribution") or {}), "confidence": lang_conf},
-        "chunk_plan": [{"chunk_id": f"chunk_{i:03d}", "start": float(s), "end": float(t)} for i, (s, t) in enumerate(chunks)]
+        "chunk_plan": [{"chunk_id": f"chunk_{i:03d}", "start": float(s), "end": float(t)} for i, (s, t) in enumerate(chunks)],
     }
     (out_dir / "episode_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    diar_json = {
-        "schema_version": "1.0",
-        "job_id": job_id,
-        "item_id": item_id,
-        "segments": diar_segments,
-        "clusters": []
-    }
+    diar_json = {"schema_version": "1.0", "job_id": job_id, "item_id": item_id, "segments": diar_segments, "clusters": []}
     for ci in cluster_infos:
         m = matches.get(ci.cluster_id, {})
-        diar_json["clusters"].append({
-            "cluster_id": ci.cluster_id,
-            "speech_seconds": ci.speech_seconds,
-            "centroid_embedding": ci.centroid,
-            "tightness": ci.tightness,
-            "voice_match": {
-                "best_alias": m.get("best_alias"),
-                "best_score": m.get("best_score"),
-                "second_best_alias": m.get("second_best_alias"),
-                "second_best_score": m.get("second_best_score"),
-                "threshold_used": m.get("threshold_used"),
-                "margin_used": m.get("margin_used"),
-                "decision": m.get("decision")
-            },
-            "text_evidence": {
-                "names_found": m.get("names_found", []),
-                "notes": []
+        diar_json["clusters"].append(
+            {
+                "cluster_id": ci.cluster_id,
+                "speech_seconds": ci.speech_seconds,
+                "centroid_embedding": ci.centroid,
+                "tightness": ci.tightness,
+                "voice_match": {
+                    "best_alias": m.get("best_alias"),
+                    "best_score": m.get("best_score"),
+                    "second_best_alias": m.get("second_best_alias"),
+                    "second_best_score": m.get("second_best_score"),
+                    "threshold_used": m.get("threshold_used"),
+                    "margin_used": m.get("margin_used"),
+                    "decision": m.get("decision"),
+                },
+                "text_evidence": {"names_found": m.get("names_found", []), "notes": []},
             }
-        })
+        )
     (out_dir / "diarization.json").write_text(json.dumps(diar_json, ensure_ascii=False, indent=2), encoding="utf-8")
 
     tjson = {"schema_version": "1.0", "job_id": job_id, "item_id": item_id, "segments": transcript}
@@ -1005,31 +1006,25 @@ def process_episode(
 
     (out_dir / "features_by_speaker.json").write_text(json.dumps(features, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    srt_text = render_srt(transcript)
-    (out_dir / "transcript.srt").write_text(srt_text, encoding="utf-8")
+    (out_dir / "transcript.srt").write_text(render_srt(transcript), encoding="utf-8")
 
-    # Review unknowns file (if needed)
     review_path = ""
     if unknown_clusters:
         review_file = review_root / f"{job_id}_unknowns.yaml"
         build_review_unknowns(job_id, unknown_clusters, transcript, matches, review_file)
         review_path = str(review_file)
 
-    # Update profiles for assigned speakers only
     from podscription.profiles import update_profile_with_cluster, new_profile
-    episode_ref = {"job_id": job_id, "item_id": item_id, "podcast": podcast, "episode_slug": episode_slug, "duration_seconds": dur}
 
-    # Map cluster_id -> speaker_label
+    episode_ref = {"job_id": job_id, "item_id": item_id, "podcast": podcast, "episode_slug": episode_slug, "duration_seconds": dur}
     cluster_to_label = {}
     for d in diar_segments:
         cluster_to_label[d["cluster_id"]] = d.get("assigned_alias") or d["cluster_id"]
 
-    # Map speaker_label -> cluster_info
     ci_by_id = {c.cluster_id: c for c in cluster_infos}
     for cid, label in cluster_to_label.items():
         if label.startswith("UNKNOWN_"):
             continue
-        # ensure profile exists
         prof = profiles.get(label)
         if prof is None:
             prof = new_profile(profiles_dir, label, full_name=label)
@@ -1037,7 +1032,6 @@ def process_episode(
         ci = ci_by_id.get(cid)
         if not ci:
             continue
-        # anchors: store a few timecodes/snippets
         anchors = []
         for seg in transcript:
             if seg["cluster_id"] == cid and len(anchors) < 5 and len(seg["text"]) >= 10:
@@ -1053,5 +1047,5 @@ def process_episode(
         "diarization_json": str((out_dir / "diarization.json")),
         "features_by_speaker_json": str((out_dir / "features_by_speaker.json")),
         "transcript_segments_json": str((out_dir / "transcript_segments.json")),
-        "review_unknowns_yaml": review_path
+        "review_unknowns_yaml": review_path,
     }

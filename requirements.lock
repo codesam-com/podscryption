@@ -1,0 +1,17 @@
+# Core
+PyYAML==6.0.2
+requests==2.32.3
+numpy==2.1.1
+scipy==1.14.1
+soundfile==0.12.1
+
+# ML
+scikit-learn==1.5.1
+torch==2.4.1
+speechbrain==1.0.0
+
+# ASR
+faster-whisper==1.0.3
+
+# Optional ingest (only used if allow_ivoox=true)
+yt-dlp==2025.01.26

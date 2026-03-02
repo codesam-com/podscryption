@@ -1,0 +1,27 @@
+schema_version: "1.0"
+
+cache_layout:
+  root: ".cache"
+  pip: ".cache/pip"
+  venv: ".cache/venv"
+  hf_home: ".cache/hf"
+  speechbrain: ".cache/speechbrain"
+
+models:
+  - id: "asr_fasterwhisper_large_v3"
+    kind: "asr"
+    engine: "ctranslate2"
+    primary:
+      provider: "huggingface"
+      repo_id: "Systran/faster-whisper-large-v3"
+      revision: "edaa852ec7e145841d8ffdb056a99866b5f0a478"
+    notes: >
+      Used by faster-whisper. When loading WhisperModel("large-v3"), the CTranslate2 model is auto-downloaded from HF Hub. :contentReference[oaicite:5]{index=5}
+
+  - id: "spkrec_ecapa_voxceleb"
+    kind: "speaker_embedding"
+    engine: "speechbrain"
+    primary:
+      provider: "huggingface"
+      repo_id: "speechbrain/spkrec-ecapa-voxceleb"
+      revision: "65d4c5e6cbe8335e8cab42177c5032f1c0c0f749"

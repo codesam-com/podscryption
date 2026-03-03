@@ -28,12 +28,12 @@ fill:
 - cluster_id: SPEAKER_0
   timecode: '00:05:52.700'
   text: sí está hecho
-  fill_alias: ''
+  fill_alias: 'Begoña'
 - cluster_id: SPEAKER_1
   timecode: '00:00:01.000'
   text: y a Carlos que venías
-  fill_alias: ''
+  fill_alias: 'Alberto Aparisi'
 - cluster_id: SPEAKER_2
   timecode: '00:11:33.920'
   text: no lo tengo planeado
-  fill_alias: ''
+  fill_alias: 'Tipa'
